@@ -1,0 +1,11 @@
+proxies:
+- name: foobar
+
+servers:
+- name: example
+  base-url: https://example.com
+
+environments:
+- name: demo
+  mappings:
+    foobar: example
