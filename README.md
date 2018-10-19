@@ -29,8 +29,8 @@ environments:
 
 Creates two proxies:
 
-- `foobar.localhost` "foobar" proxy pointed to current environment
-- `foobar-demo.localhsot` "foobar" proxy pointed to "demo" environment 
+- `foobar.localhost:8042` "foobar" proxy pointed to current environment
+- `foobar-demo.localhsot:8042` "foobar" proxy pointed to "demo" environment 
 
 ## Usage
 

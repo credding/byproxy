@@ -1,12 +1,9 @@
 package main
 
 import (
-	"errors"
 	"flag"
 	"fmt"
-	"github.com/credding/byproxy/pkg/cli"
-	"github.com/credding/byproxy/pkg/server"
-	"github.com/credding/byproxy/pkg/util"
+	"github.com/credding/byproxy/pkg/byproxy"
 	"log"
 	"os"
 )
@@ -24,7 +21,7 @@ func main() {
 
 	mainFlags.Parse(os.Args[1:])
 
-	config, e := util.LoadConfig(configLocation)
+	config, e := byproxy.LoadConfig(configLocation)
 	if e != nil {
 		log.Fatalln(e)
 	}
@@ -48,66 +45,53 @@ func main() {
 		status, e := clientCommand(config, command, mainFlags.Args())
 		if e != nil {
 			fmt.Println(e)
-		}
-		if status != nil {
+		} else if status != nil {
 			printStatus(status)
 		}
 	}
 }
 
-func startServer(config *util.Config) error {
-
-	fmt.Println("Starting ByProxy server")
-
-	proxy, e := server.NewByProxy(config)
-	if e != nil {
+func startServer(config *byproxy.Config) error {
+	if server, e := byproxy.NewServer(config); e != nil {
 		return e
+	} else {
+		log.Println("starting ByProxy server")
+		printStatus(server.Status())
+		return server.ListenAndServe()
 	}
-
-	if mappings, e := util.LoadMappings(); mappings != nil {
-		proxy.LoadMappings(mappings)
-	} else if e != nil {
-		fmt.Println(e)
-	}
-
-	if e := proxy.ListenAndServe(); e != nil {
-		return e
-	}
-	return nil
 }
 
-func clientCommand(config *util.Config, command string, args []string) (*server.Status, error) {
+func clientCommand(config *byproxy.Config, command string, args []string) (*byproxy.Status, error) {
 
-	global := config.Global
-	addr := fmt.Sprintf("%s:%d", global.Addr, global.Port)
-	remote, e := cli.NewRemote(addr)
+	address := fmt.Sprintf("%s:%d", config.Global.Addr, config.Global.Port)
+	remote, e := byproxy.NewRemote(address)
 	if e != nil {
 		return nil, e
 	}
 
 	switch command {
 	case "reload":
-		fmt.Println("Reloading ByProxy configuration")
-		return remote.Reload()
+		fmt.Println("reloading ByProxy configuration")
+		return remote.Reload(config)
 	case "status":
 		return remote.Status()
 	case "use":
 		return remote.Use(args[1], args[2:]...)
 	case "stop":
-		fmt.Println("Stopping ByProxy server")
+		fmt.Println("stopping ByProxy server")
 		return nil, remote.Stop()
 	default:
-		return nil, errors.New("Unknown command: " + command)
+		return nil, fmt.Errorf("unknown command: %s", command)
 	}
 }
 
-func printStatus(status *server.Status) {
-	fmt.Println("Mappings:")
-	for proxy, mapping := range status.Mappings {
-		fmt.Println(proxy + " -> " + mapping)
+func printStatus(status *byproxy.Status) {
+	fmt.Println("mappings:")
+	for _, proxy := range status.Proxies {
+		fmt.Printf(" %s -> %s\n", proxy, status.Mappings[proxy])
 	}
-	fmt.Println("Environments:")
+	fmt.Println("environments:")
 	for _, environment := range status.Environments {
-		fmt.Println("- " + environment)
+		fmt.Println(" - " + environment)
 	}
 }

@@ -1,125 +1,82 @@
-package util
+package byproxy
 
 import (
 	"gopkg.in/yaml.v2"
 	"io/ioutil"
-	"os"
 	"path"
-	"syscall"
 )
 
 type Config struct {
-	Global       *Global
-	Proxies      []*Proxy
-	Servers      []*Server
-	Environments []*Environment
-	Filters      []*Filter
+	Global       *GlobalConfig
+	Proxies      []*ProxyConfig
+	Servers      []*ServerConfig
+	Environments []*EnvironmentConfig
+	Filters      []*FilterConfig
 }
 
-type Global struct {
+type GlobalConfig struct {
 	Hostname string
 	Addr     string
 	Port     int
 	Filters  []*FilterMapping
 }
 
-type Proxy struct {
+type ProxyConfig struct {
 	Name     string
 	Hostname string
 	Filters  []*FilterMapping
 }
 
-type Server struct {
+type ServerConfig struct {
 	Name    string
 	BaseUrl string `yaml:"base-url"`
 	Filters []*FilterMapping
 }
 
-type Environment struct {
+type EnvironmentConfig struct {
 	Name     string
 	Mappings map[string]string
 	Filters  []*FilterMapping
 }
 
-type Filter struct {
+type FilterConfig struct {
 	Name    string
 	Handler string
-	Config  FilterConfig
+	Config  FilterOptions
 }
 
 type FilterMapping struct {
 	Name   string
-	Config FilterConfig
+	Config FilterOptions
 }
 
-type FilterConfig map[string]interface{}
+type FilterOptions map[string]interface{}
 
 func LoadConfig(location string) (*Config, error) {
-
-	config := &Config{}
 
 	if location == "" {
 		location = path.Join(userHomeDir(), ".byp/config.yaml")
 	}
 
-	if e := config.loadConfig(location); e != nil {
+	bytes, e := ioutil.ReadFile(location)
+	if e != nil {
 		return nil, e
 	}
-	config.setDefaults()
+
+	config := &Config{}
+	if e = yaml.Unmarshal(bytes, config); e != nil {
+		return nil, e
+	}
+
+	config.SetDefaults()
 
 	return config, nil
 }
 
-func LoadMappings() (map[string]string, error) {
-
-	location := path.Join(userHomeDir(), ".byp/mappings")
-	mappings := make(map[string]string)
-
-	bytes, e := ioutil.ReadFile(location)
-	if e != nil {
-		if e, ok := e.(*os.PathError); ok {
-			if e.Err == syscall.ENOENT {
-				return nil, nil
-			}
-		}
-		return nil, e
-	}
-	if e = yaml.Unmarshal(bytes, &mappings); e != nil {
-		return nil, e
-	}
-	return mappings, nil
-}
-
-func WriteMappings(mappings map[string]string) error {
-
-	location := path.Join(userHomeDir(), ".byp/mappings")
-
-	bytes, e := yaml.Marshal(mappings)
-	if e != nil {
-		return e
-	}
-	if e = ioutil.WriteFile(location, bytes, 0644); e != nil {
-		return e
-	}
-	return nil
-}
-
-func (config *Config) loadConfig(location string) error {
-
-	bytes, e := ioutil.ReadFile(location)
-	if e != nil {
-		return e
-	}
-	if e = yaml.Unmarshal(bytes, config); e != nil {
-		return e
-	}
-	return nil
-}
-
-func (config *Config) setDefaults() {
+func (config *Config) SetDefaults() {
 
 	if config.Global == nil {
-		config.Global = &Global{"localhost", "127.0.0.1", 8042, nil}
+		config.Global = &GlobalConfig{"localhost", "127.0.0.1", 8042, nil}
 	} else {
 		if config.Global.Hostname == "" {
 			config.Global.Hostname = "localhost"
@@ -138,10 +95,10 @@ func (config *Config) setDefaults() {
 		}
 	}
 
-	usages := make(map[string][]FilterConfig)
+	usages := make(map[string][]FilterOptions)
 
 	for _, filter := range config.Filters {
-		usages[filter.Name] = make([]FilterConfig, 0)
+		usages[filter.Name] = make([]FilterOptions, 0)
 	}
 
 	collectFilterUsages(usages, config.Global.Filters)
@@ -153,6 +110,7 @@ func (config *Config) setDefaults() {
 	}
 	for _, environment := range config.Environments {
 		collectFilterUsages(usages, environment.Filters)
+		addImplicitMappings(config, environment)
 	}
 
 	for _, filter := range config.Filters {
@@ -160,20 +118,40 @@ func (config *Config) setDefaults() {
 	}
 }
 
-func collectFilterUsages(usages map[string][]FilterConfig, filters []*FilterMapping) {
+func collectFilterUsages(usages map[string][]FilterOptions, filters []*FilterMapping) {
 	for _, usage := range filters {
 		if usage.Config == nil {
-			usage.Config = make(FilterConfig)
+			usage.Config = make(FilterOptions)
 		}
 		usages[usage.Name] = append(usages[usage.Name], usage.Config)
 	}
 }
 
-func setFilterDefaults(usages map[string][]FilterConfig, filter *Filter) {
+func setFilterDefaults(usages map[string][]FilterOptions, filter *FilterConfig) {
 	for _, config := range usages[filter.Name] {
 		for key, value := range filter.Config {
 			if _, exists := config[key]; !exists {
 				config[key] = value
+			}
+		}
+	}
+}
+
+func addImplicitMappings(config *Config, environment *EnvironmentConfig) {
+
+	if environment.Mappings == nil {
+		environment.Mappings = make(map[string]string)
+	}
+
+	for _, proxy := range config.Proxies {
+		if environment.Mappings[proxy.Name] != "" {
+			continue
+		}
+		implicitServer := proxy.Name + "-" + environment.Name
+		for _, server := range config.Servers {
+			if server.Name == implicitServer {
+				environment.Mappings[proxy.Name] = server.Name
+				break
 			}
 		}
 	}

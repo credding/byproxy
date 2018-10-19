@@ -1,4 +1,4 @@
-package server
+package byproxy
 
 import (
 	"context"
